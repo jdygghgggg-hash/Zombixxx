@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Zombie Base — Yapi Edition</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background: #0a1420;
+            font-family: 'Arial', sans-serif;
+            color: white;
+            touch-action: none;
+            width: 100vw;
+            height: 100vh;
+            position: fixed;
+        }
+        #gameCanvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(to bottom, #1a3a4a, #0e1e2a);
+        }
+        #ui {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            z-index: 20;
+            font-size: 20px;
+            background: rgba(0,0,0,0.5);
+            padding: 10px 20px;
+            border-radius: 40px;
+            display: flex;
+            gap: 30px;
+            backdrop-filter: blur(5px);
+            border: 2px solid #7c4dff;
+            font-weight: bold;
+        }
+        #ui span {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        #joystickZone {
+            position: absolute;
+            bottom: 40px;
+            left: 40px;
+            width: 140px;
+            height: 140px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 50%;
+            border: 3px solid #7c4dff;
+            z-index: 30;
+            backdrop-filter: blur(4px);
+        }
+        #joystick {
+            position: absolute;
+            width: 60px;
+            height: 60px;
+            background: #7c4dff;
+            border-radius: 50%;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            box-shadow: 0 0 20px #7c4dff;
+        }
+        #fireButton {
+            position: absolute;
+            bottom: 40px;
+            right: 40px;
+            width: 140px;
+            height: 140px;
+            background: rgba(255, 60, 60, 0.8);
+            border-radius: 50%;
+            border: 4px solid #fff;
+            color: white;
+            font-size: 40px;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 30;
+            box-shadow: 0 0 30px rgba(255,0,0,0.5);
+            backdrop-filter: blur(4px);
+        }
+        #menu {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.9);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 200;
+            backdrop-filter: blur(10px);
+        }
+        #menu h1 {
+            font-size: 60px;
+            color: #7c4dff;
+            text-shadow: 0 0 30px #7c4dff;
+            margin-bottom: 30px;
+        }
+        #menu button {
+            font-size: 40px;
+            padding: 20px 60px;
+            margin: 15px;
+            border: none;
+            border-radius: 60px;
+            background: #7c4dff;
+            color: white;
+            box-shadow: 0 7px 0 #4a2b9c;
+            transition: 0.1s;
+            font-weight: bold;
+            width: 300px;
+        }
+        #menu button:active {
+            transform: translateY(5px);
+            box-shadow: 0 2px 0 #4a2b9c;
+        }
+    </style>
+</head>
+<body>
+    <div id="menu">
+        <h1>🧟 ZOMBIE BASE</h1>
+        <button id="startBtn">▶ СТАРТ</button>
+        <button id="exitBtn">✖ ВЫХОД</button>
+    </div>
+
+    <div id="ui" style="display: none;">
+        <span>❤️ <span id="lives">3</span></span>
+        <span>🔫 <span id="ammo">30</span></span>
+        <span>💀 <span id="kills">0</span></span>
+    </div>
+    <div id="joystickZone" style="display: none;">
+        <div id="joystick"></div>
+    </div>
+    <div id="fireButton" style="display: none;">🔫</div>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        let width, height;
+
+        // База сверху
+        const BASE_Y = 130;
+        const PLAYER_SPEED = 4;
+
+        // Игрок
+        let player = {
+            x: 0, y: BASE_Y + 60,
+            r: 15, w: 26, h: 44,
+            lives: 3, kills: 0
+        };
+
+        // Пули
+        let bullets = [];
+        const BULLET_SPEED = 10;
+        const MAX_AMMO = 30;
+        let ammo = MAX_AMMO;
+
+        // Зомби
+        let zombies = [];
+        const ZOMBIE_SPEED = 1.2;
+        const SPAWN_RATE = 12;
+
+        // Солдат
+        let soldier = {
+            x: 100, y: BASE_Y + 35,
+            cooldown: 0,
+            bullets: []
+        };
+
+        // Ящики
+        let ammoCrates = [
+            { x: 50, y: BASE_Y + 35, active: true },
+            { x: 250, y: BASE_Y + 45, active: true }
+        ];
+
+        // Направление
+        let aimDir = { x: 0, y: -1 };
+        let joystickActive = false, joyDir = { x: 0, y: 0 };
+        let firePressed = false;
+        let gameRunning = false;
+
+        // Меню
+        const menu = document.getElementById('menu');
+        const ui = document.getElementById('ui');
+        const jZone = document.getElementById('joystickZone');
+        const fBtn = document.getElementById('fireButton');
+        const startBtn = document.getElementById('startBtn');
+        const exitBtn = document.getElementById('exitBtn');
+
+        startBtn.onclick = () => {
+            menu.style.display = 'none';
+            ui.style.display = 'flex';
+            jZone.style.display = 'block';
+            fBtn.style.display = 'flex';
+            gameRunning = true;
+            resetGame();
+        };
+
+        exitBtn.onclick = () => {
+            if (confirm('Закрыть игру?')) window.close();
+        };
+
+        // Размер
+        function resize() {
+            width = window.innerWidth;
+            height = window.innerHeight;
+            canvas.width = width;
+            canvas.height = height;
+            player.x = width / 2;
+            player.y = BASE_Y + 70;
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        // Джойстик
+        const jStick = document.getElementById('joystick');
+        jZone.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            joystickActive = true;
+            updateJoystick(e.touches[0]);
+        });
+        jZone.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            updateJoystick(e.touches[0]);
+        });
+        jZone.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            joystickActive = false;
+            jStick.style.transform = 'translate(-50%, -50%)';
+            joyDir = { x: 0, y: 0 };
+        });
+
+        function updateJoystick(t) {
+            const rect = jZone.getBoundingClientRect();
+            const cx = rect.left + rect.width/2;
+            const cy = rect.top + rect.height/2;
+            const maxD = rect.width/2;
+            let dx = t.clientX - cx;
+            let dy = t.clientY - cy;
+            const d = Math.min(Math.sqrt(dx*dx + dy*dy), maxD);
+            if (d > 5) {
+                joyDir.x = dx / maxD;
+                joyDir.y = dy / maxD;
+                aimDir.x = joyDir.x;
+                aimDir.y = joyDir.y;
+            }
+            const ang = Math.atan2(dy, dx);
+            jStick.style.transform = `translate(calc(-50% + ${Math.cos(ang)*d}px), calc(-50% + ${Math.sin(ang)*d}px))`;
+        }
+
+        fBtn.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            firePressed = true;
+        });
+        fBtn.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            firePressed = false;
+        });
+
+        function shootPlayer() {
+            if (ammo <= 0) return;
+            ammo--;
+            let dir = { x: aimDir.x, y: aimDir.y };
+            const len = Math.hypot(dir.x, dir.y);
+            if (len > 0.01) { dir.x /= len; dir.y /= len; }
+            else { dir.x = 0; dir.y = -1; }
+            bullets.push({
+                x: player.x, y: player.y - 15,
+                vx: dir.x * BULLET_SPEED, vy: dir.y * BULLET_SPEED
+            });
+        }
+
+        function shootSoldier() {
+            if (soldier.cooldown > 0 || zombies.length === 0) return;
+            let target = zombies[0];
+            let dx = target.x - soldier.x;
+            let dy = target.y - soldier.y;
+            let len = Math.hypot(dx, dy);
+            if (len < 1) return;
+            dx /= len; dy /= len;
+            soldier.bullets.push({
+                x: soldier.x, y: soldier.y,
+                vx: dx * BULLET_SPEED, vy: dy * BULLET_SPEED
+            });
+            soldier.cooldown = 20;
+        }
+
+        function spawnZombie() {
+            let side = Math.floor(Math.random() * 4);
+            let x, y;
+            if (side === 0) { x = -30; y = Math.random() * height; }
+            else if (side === 1) { x = width + 30; y = Math.random() * height; }
+            else if (side === 2) { x = Math.random() * width; y = -30; }
+            else { x = Math.random() * width; y = height + 30; }
+            if (y < BASE_Y + 40) y = BASE_Y + 50;
+            zombies.push({
+                x, y,
+                r: 12, w: 22, h: 36,
+                speed: ZOMBIE_SPEED + Math.random()*0.6
+            });
+        }
+
+        function update() {
+            if (!gameRunning) return;
+
+            // Движение игрока
+            if (joystickActive) {
+                player.x += joyDir.x * PLAYER_SPEED;
+                player.y += joyDir.y * PLAYER_SPEED;
+                player.x = Math.max(30, Math.min(width - 30, player.x));
+                player.y = Math.max(BASE_Y + 35, Math.min(height - 50, player.y));
+            }
+
+            // Солдат
+            if (soldier.cooldown > 0) soldier.cooldown--;
+
+            // Ящики
+            for (let c of ammoCrates) {
+                if (!c.active) continue;
+                let d = Math.hypot(player.x - c.x, player.y - c.y);
+                if (d < 40) {
+                    ammo = MAX_AMMO;
+                    c.active = false;
+                    setTimeout(() => c.active = true, 8000);
+                }
+            }
+
+            // Стрельба
+            if (firePressed) shootPlayer();
+            if (zombies.length > 0 && soldier.cooldown === 0) shootSoldier();
+
+            // Пули игрока
+            for (let i = bullets.length-1; i>=0; i--) {
+                let b = bullets[i];
+                b.x += b.vx; b.y += b.vy;
+                if (b.x<0 || b.x>width || b.y<0 || b.y>height) { bullets.splice(i,1); continue; }
+                for (let j = zombies.length-1; j>=0; j--) {
+                    let z = zombies[j];
+                    let d = Math.hypot(b.x - z.x, b.y - z.y);
+                    if (d < z.r) {
+                        bullets.splice(i,1);
+                        zombies.splice(j,1);
+                        player.kills++;
+                        break;
+                    }
+                }
+            }
+
+            // Пули солдата
+            for (let i = soldier.bullets.length-1; i>=0; i--) {
+                let b = soldier.bullets[i];
+                b.x += b.vx; b.y += b.vy;
+                if (b.x<0 || b.x>width || b.y<0 || b.y>height) { soldier.bullets.splice(i,1); continue; }
+                for (let j = zombies.length-1; j>=0; j--) {
+                    let z = zombies[j];
+                    let d = Math.hypot(b.x - z.x, b.y - z.y);
+                    if (d < z.r) {
+                        soldier.bullets.splice(i,1);
+                        zombies.splice(j,1);
+                        player.kills++;
+                        break;
+                    }
+                }
+            }
+
+            // Зомби
+            for (let i = zombies.length-1; i>=0; i--) {
+                let z = zombies[i];
+                let dx = player.x - z.x;
+                let dy = player.y - z.y;
+                let len = Math.hypot(dx, dy);
+                if (len > 0.5) {
+                    z.x += (dx/len) * z.speed;
+                    z.y += (dy/len) * z.speed;
+                }
+                if (z.y < BASE_Y + 25) z.y = BASE_Y + 30;
+                let d = Math.hypot(player.x - z.x, player.y - z.y);
+                if (d < player.r + z.r) {
+                    player.lives--;
+                    zombies.splice(i,1);
+                    if (player.lives <= 0) {
+                        alert('💀 ТЫ УМЕР!');
+                        resetGame();
+                    }
+                }
+            }
+
+            // Спавн
+            if (Math.random() * 1000 < SPAWN_RATE) spawnZombie();
+
+            document.getElementById('lives').innerText = player.lives;
+            document.getElementById('ammo').innerText = ammo;
+            document.getElementById('kills').innerText = player.kills;
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, width, height);
+
+            // База
+            ctx.fillStyle = '#2c5f7a';
+            ctx.fillRect(0, 0, width, BASE_Y);
+            ctx.fillStyle = '#3e7a9a';
+            ctx.fillRect(0, BASE_Y-8, width, 8);
+            ctx.font = 'bold 18px Arial';
+            ctx.fillStyle = 'white';
+            ctx.fillText('🛡️ БАЗА', 15, BASE_Y-20);
+
+            // Солдат
+            ctx.fillStyle = '#2c3e50';
+            ctx.fillRect(soldier.x-14, soldier.y-24, 28, 38);
+            ctx.fillStyle = '#f1c40f';
+            ctx.beginPath();
+            ctx.arc(soldier.x, soldier.y-38, 14, 0, 2*Math.PI);
+            ctx.fill();
+
+            // Ящики
+            for (let c of ammoCrates) {
+                if (!c.active) continue;
+                ctx.fillStyle = '#f39c12';
+                ctx.fillRect(c.x-18, c.y-12, 36, 24);
+                ctx.fillStyle = '#e67e22';
+                ctx.font = 'bold 22px Arial';
+                ctx.fillText('📦', c.x-18, c.y+8);
+            }
+
+            // Игрок
+            ctx.fillStyle = '#3498db';
+            ctx.fillRect(player.x-13, player.y-32, 26, 44);
+            ctx.fillStyle = '#f5e6d3';
+            ctx.beginPath();
+            ctx.arc(player.x, player.y-48, 15, 0, 2*Math.PI);
+            ctx.fill();
+
+            // Пули
+            ctx.fillStyle = '#f1c40f';
+            for (let b of bullets) {
+                ctx.fillRect(b.x-4, b.y-8, 8, 16);
+            }
+            ctx.fillStyle = '#e67e22';
+            for (let b of soldier.bullets) {
+                ctx.beginPath();
+                ctx.arc(b.x, b.y, 6, 0, 2*Math.PI);
+                ctx.fill();
+            }
+
+            // Зомби
+            for (let z of zombies) {
+                ctx.fillStyle = '#7d3c1b';
+                ctx.fillRect(z.x-11, z.y-28, 22, 36);
+                ctx.fillStyle = '#27ae60';
+                ctx.beginPath();
+                ctx.arc(z.x, z.y-44, 12, 0, 2*Math.PI);
+                ctx.fill();
+            }
+
+            requestAnimationFrame(draw);
+        }
+
+        function resetGame() {
+            player.lives = 3; player.kills = 0;
+            ammo = MAX_AMMO;
+            zombies = [];
+            bullets = [];
+            soldier.bullets = [];
+            soldier.cooldown = 0;
+            player.x = width/2; player.y = BASE_Y + 70;
+        }
+
+        setInterval(update, 1000/60);
+        draw();
+
+        document.body.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+    </script>
+</body>
+</html>
